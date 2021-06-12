@@ -1,60 +1,95 @@
-# template-for-proposals
+# ArrayBufferList
 
-A repository template for ECMAScript proposals.
+## Summary
 
-## Before creating a proposal
+This proposal introduces `ArrayBufferList`, an `ArrayBuffer`-like class that can
+be used in the same places that `ArrayBuffer` can, much like
+`SharedArrayBuffer`. The purpose is to be able to operate on sequences of
+`ArrayBuffer`s in the same ways that single `ArrayBuffer`s can. It can be
+thought of as a form of lazy concatenation, similar to V8's "cons strings".
 
-Please ensure the following:
-  1. You have read the [process document](https://tc39.github.io/process-document/)
-  1. You have reviewed the [existing proposals](https://github.com/tc39/proposals/)
-  1. You are aware that your proposal requires being a member of TC39, or locating a TC39 delegate to "champion" your proposal
+## Motivation
 
-## Create your proposal repo
+Concatenation of data is very useful in many applications. Being able to
+_conceptually_ concatenate without _physically/actually_ concatenating provides
+the ability to defer true concatenation until later on, even if operations need
+to be performed on the data. Today, concatenating `ArrayBuffer`s means
+allocating a new `ArrayBuffer` as big as the sum of the lengths of the input
+`ArrayBuffer`s, and then data needs to be copied manually, typically with a
+`TypedArray` view. This is costly, and for large data, can be a bottleneck in an
+application. If a sequence of `ArrayBuffer`s could be treated the same as a
+single `ArrayBuffer` for all intents and purposes, manual copying wouldn't be
+needed in cases where users want or need to operation on the sequence as if it
+were a single one.
 
-Follow these steps:
-  1.  Click the green ["use this template"](https://github.com/tc39/template-for-proposals/generate) button in the repo header. (Note: Do not fork this repo in GitHub's web interface, as that will later prevent transfer into the TC39 organization)
-  1.  Go to your repo settings “Options” page, under “GitHub Pages”, and set the source to the **main branch** under the root (and click Save, if it does not autosave this setting)
-      1. check "Enforce HTTPS"
-      1. On "Options", under "Features", Ensure "Issues" is checked, and disable "Wiki", and "Projects" (unless you intend to use Projects)
-      1. Under "Merge button", check "automatically delete head branches"
-<!--
-  1.  Avoid merge conflicts with build process output files by running:
-      ```sh
-      git config --local --add merge.output.driver true
-      git config --local --add merge.output.driver true
-      ```
-  1.  Add a post-rewrite git hook to auto-rebuild the output on every commit:
-      ```sh
-      cp hooks/post-rewrite .git/hooks/post-rewrite
-      chmod +x .git/hooks/post-rewrite
-      ```
--->
-  3.  ["How to write a good explainer"][explainer] explains how to make a good first impression.
+One example of where this is useful is in encoding data. Consider a set of
+well-known byte sequences (say, for example, to indicate things like types and
+lengths for subsequent data) and a cache of data (say from strings to UTF-8 byte
+streams). An encoder might pull from those two data sets and add original data
+of its own, stitching it all together into a contiguous memory chunk via
+copying. If the encoder could avoid this copying operation, that would be
+beneficial for performance.
 
-      > Each TC39 proposal should have a `README.md` file which explains the purpose
-      > of the proposal and its shape at a high level.
-      >
-      > ...
-      >
-      > The rest of this page can be used as a template ...
+## Details
 
-      Your explainer can point readers to the `index.html` generated from `spec.emu`
-      via markdown like
+Internally, `ArrayBufferList` stores a sequence of `ArrayBuffer`s and/or
+`SharedArrayBuffer`s. When viewed with `TypedArray`s or `DataView`s, the user
+perception is of a contiguous single `ArrayBuffer`. Wherever operations on
+`TypedArray`s result in the creation of a new `ArrayBuffer` (for example,
+copying), a new `ArraBuffer` is created, rather than a new `ArrayBufferList`.
 
-      ```markdown
-      You can browse the [ecmarkup output](https://ACCOUNT.github.io/PROJECT/)
-      or browse the [source](https://github.com/ACCOUNT/PROJECT/blob/HEAD/spec.emu).
-      ```
+The class has the same interface as ArrayBuffer, with the following differences:
 
-      where *ACCOUNT* and *PROJECT* are the first two path elements in your project's Github URL.
-      For example, for github.com/**tc39**/**template-for-proposals**, *ACCOUNT* is "tc39"
-      and *PROJECT* is "template-for-proposals".
+1. The constructor takes either no arguments or an iterable of `ArrayBuffer`s,
+   which constitute the inital state of the sequence.
+2. `ArrayBufferList.prototype.append(arrayBuffer)`, which adds an `ArrayBuffer`
+   to the end of the sequence.
+3. The `.length` property refers to sum of the lengths of all the `ArrayBuffer`s
+   in the sequence.
+4. `ArrayBufferList.prototype.slice()` returns an `ArrayBuffer`, rather than an
+   `ArrayBufferList`.
+5. `ArrayBufferList` does not implement `Transferrable`.
 
+All existing functions providing `ArrayBuffer`s continue to do so. All places
+where `ArrayBuffer` can be used can also use `ArrayBufferList`.
 
-## Maintain your proposal repo
+This proposal does _not_ introduce a `SharedArrayBufferList`.
 
-  1. Make your changes to `spec.emu` (ecmarkup uses HTML syntax, but is not HTML, so I strongly suggest not naming it ".html")
-  1. Any commit that makes meaningful changes to the spec, should run `npm run build` and commit the resulting output.
-  1. Whenever you update `ecmarkup`, run `npm run build` and commit any changes that come from that dependency.
+## Examples
 
-  [explainer]: https://github.com/tc39/how-we-work/blob/HEAD/explainer.md
+#### Simple concatenation
+
+```js
+// Grab data from 3 endpoints, concatenate it all, and send it elsewhere
+const res = await Promise.all([0, 1, 2].map(x => fetch(`https://example.com/${x}`)))
+const bufs = await Promise.all(res.map(x => x.arrayBuffer()))
+fetch('https://example.com/post, {
+  method: 'POST',
+  body: new ArrayBufferList(bufs...)
+})
+```
+
+#### Encoding
+
+```js
+const cache = { /* values are all ArrayBuffers */}
+
+function encode(list) {
+  const result = new ArrayBufferList();
+  for (const item of list) {
+    result.append(cache[item];
+  }
+  return result; // use wherever ArrayBuffers are needed
+}
+```
+
+## Prior art
+
+* <https://github.com/rvagg/bl> This is roughly the same concept, but for
+  Node.js Buffers.
+
+## TODO
+
+* Should users be able to access and manipulate the sequence directly (e.g. with
+  `Array`-like methods), or just have append since it will likely cover a good
+  portion of possible use-cases?
