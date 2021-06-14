@@ -83,6 +83,15 @@ function encode(list) {
 }
 ```
 
+## Alternatives
+
+* `ArrayBuffer.prototype.append` could provide similar functionality, but
+  transparently to users. That is, given a `ArrayBuffer`, it wouldn't be
+  apparent to users whether it was backed by contiguous memory or a sequence of
+  memory chunks.
+* Allow for subclasses of `ArrayBuffer` to intercept data access. Then an
+  `ArrayBufferList` class could exist in userland.
+
 ## Prior art
 
 * <https://github.com/rvagg/bl> This is roughly the same concept, but for
